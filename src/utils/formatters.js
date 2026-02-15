@@ -47,6 +47,19 @@ export const generateId = (prefix = 'id') => {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
 
+// Generate next sequential number for budgets/obras
+export const getNextNumber = (items, prefix = 'NUM') => {
+  if (!items || items.length === 0) return `${prefix}-001`;
+  const nums = items
+    .map((i) => {
+      const match = (i.number || '').match(/(\d+)$/);
+      return match ? parseInt(match[1], 10) : 0;
+    })
+    .filter((n) => !isNaN(n));
+  const max = nums.length > 0 ? Math.max(...nums) : 0;
+  return `${prefix}-${String(max + 1).padStart(3, '0')}`;
+};
+
 // Get today as ISO string
 export const getToday = () => {
   return new Date().toISOString().split('T')[0];

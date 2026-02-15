@@ -1,136 +1,138 @@
 import { create } from 'zustand';
+import { saveToCloud, loadFromCloud, upsertItemToCloud, deleteFromCloud } from '../lib/syncManager';
 import { generateId } from '../utils/formatters';
-import { DEFAULT_PLANNING_PARAMS, DEFAULT_ROOMS } from '../utils/constants';
 
+/* ───── Conteo Store ───── */
+const CONTEO_TABLE = 'conteos';
 const CONTEO_KEY = 'electripro-conteos';
-const PLAN_KEY = 'electripro-plans';
 
-const loadData = (key) => {
+const getLocalConteos = () => {
   try {
-    const saved = localStorage.getItem(key);
+    const saved = localStorage.getItem(CONTEO_KEY);
     if (saved) return JSON.parse(saved);
-  } catch (e) { /* ignore */ }
+  } catch { /* ignore */ }
   return [];
 };
 
-const saveData = (key, data) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(data));
-  } catch (e) { /* ignore */ }
-};
-
-const createEmptyRoom = (name) => ({
-  name,
-  bocas: 0,
-  tomasSimp: 0,
-  tomasDob: 0,
-  tomas20: 0,
-  cajasPaso: 0,
-  cano34: 0,
-  cano1: 0,
-  obs: '',
-});
-
 export const useConteoStore = create((set, get) => ({
-  conteos: loadData(CONTEO_KEY),
+  conteos: getLocalConteos(),
+  loaded: false,
 
-  createConteo: (obraId = '') => {
-    const conteos = get().conteos;
+  loadConteos: async () => {
+    const data = await loadFromCloud(CONTEO_TABLE, CONTEO_KEY);
+    set({ conteos: data || [], loaded: true });
+  },
+
+  createConteo: (conteoData) => {
     const newConteo = {
-      id: generateId('conteo'),
-      obraId,
-      rooms: DEFAULT_ROOMS.map(createEmptyRoom),
+      id: generateId('cont'),
+      ...conteoData,
+      rooms: conteoData.rooms || [],
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
-    const updated = [...conteos, newConteo];
-    saveData(CONTEO_KEY, updated);
+    const updated = [...get().conteos, newConteo];
     set({ conteos: updated });
+    upsertItemToCloud(CONTEO_TABLE, CONTEO_KEY, newConteo);
     return newConteo;
   },
 
   updateConteo: (id, updates) => {
     const conteos = get().conteos.map((c) =>
-      c.id === id ? { ...c, ...updates } : c
+      c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c
     );
-    saveData(CONTEO_KEY, conteos);
     set({ conteos });
+    const updated = conteos.find((c) => c.id === id);
+    if (updated) upsertItemToCloud(CONTEO_TABLE, CONTEO_KEY, updated);
   },
 
-  updateRoom: (conteoId, roomIndex, updates) => {
+  updateRoom: (conteoId, roomIndex, roomData) => {
     const conteos = get().conteos.map((c) => {
       if (c.id !== conteoId) return c;
       const rooms = [...c.rooms];
-      rooms[roomIndex] = { ...rooms[roomIndex], ...updates };
-      return { ...c, rooms };
+      rooms[roomIndex] = { ...rooms[roomIndex], ...roomData };
+      return { ...c, rooms, updatedAt: new Date().toISOString() };
     });
-    saveData(CONTEO_KEY, conteos);
     set({ conteos });
+    const updated = conteos.find((c) => c.id === conteoId);
+    if (updated) upsertItemToCloud(CONTEO_TABLE, CONTEO_KEY, updated);
   },
 
-  addRoom: (conteoId, roomName) => {
+  addRoom: (conteoId, room) => {
     const conteos = get().conteos.map((c) => {
       if (c.id !== conteoId) return c;
-      return { ...c, rooms: [...c.rooms, createEmptyRoom(roomName)] };
+      return { ...c, rooms: [...c.rooms, room], updatedAt: new Date().toISOString() };
     });
-    saveData(CONTEO_KEY, conteos);
     set({ conteos });
+    const updated = conteos.find((c) => c.id === conteoId);
+    if (updated) upsertItemToCloud(CONTEO_TABLE, CONTEO_KEY, updated);
   },
 
   removeRoom: (conteoId, roomIndex) => {
     const conteos = get().conteos.map((c) => {
       if (c.id !== conteoId) return c;
       const rooms = c.rooms.filter((_, i) => i !== roomIndex);
-      return { ...c, rooms };
+      return { ...c, rooms, updatedAt: new Date().toISOString() };
     });
-    saveData(CONTEO_KEY, conteos);
     set({ conteos });
+    const updated = conteos.find((c) => c.id === conteoId);
+    if (updated) upsertItemToCloud(CONTEO_TABLE, CONTEO_KEY, updated);
   },
 
   deleteConteo: (id) => {
     const conteos = get().conteos.filter((c) => c.id !== id);
-    saveData(CONTEO_KEY, conteos);
     set({ conteos });
-  },
-
-  getConteoById: (id) => {
-    return get().conteos.find((c) => c.id === id);
+    deleteFromCloud(CONTEO_TABLE, CONTEO_KEY, id);
   },
 }));
 
-export const usePlanStore = create((set, get) => ({
-  plans: loadData(PLAN_KEY),
+/* ───── Plan Store ───── */
+const PLAN_TABLE = 'plans';
+const PLAN_KEY = 'electripro-plans';
 
-  createPlan: (obraId = '') => {
-    const plans = get().plans;
+const getLocalPlans = () => {
+  try {
+    const saved = localStorage.getItem(PLAN_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch { /* ignore */ }
+  return [];
+};
+
+export const usePlanStore = create((set, get) => ({
+  plans: getLocalPlans(),
+  loaded: false,
+
+  loadPlans: async () => {
+    const data = await loadFromCloud(PLAN_TABLE, PLAN_KEY);
+    set({ plans: data || [], loaded: true });
+  },
+
+  createPlan: (planData) => {
     const newPlan = {
       id: generateId('plan'),
-      obraId,
-      params: { ...DEFAULT_PLANNING_PARAMS },
-      employees: { caneria: 2, amurado: 2, cableado: 2, artefactos: 1 },
-      artefactosCount: 10,
+      ...planData,
+      tasks: planData.tasks || [],
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
-    const updated = [...plans, newPlan];
-    saveData(PLAN_KEY, updated);
+    const updated = [...get().plans, newPlan];
     set({ plans: updated });
+    upsertItemToCloud(PLAN_TABLE, PLAN_KEY, newPlan);
     return newPlan;
   },
 
   updatePlan: (id, updates) => {
     const plans = get().plans.map((p) =>
-      p.id === id ? { ...p, ...updates } : p
+      p.id === id ? { ...p, ...updates, updatedAt: new Date().toISOString() } : p
     );
-    saveData(PLAN_KEY, plans);
     set({ plans });
+    const updated = plans.find((p) => p.id === id);
+    if (updated) upsertItemToCloud(PLAN_TABLE, PLAN_KEY, updated);
   },
 
   deletePlan: (id) => {
     const plans = get().plans.filter((p) => p.id !== id);
-    saveData(PLAN_KEY, plans);
     set({ plans });
-  },
-
-  getPlanById: (id) => {
-    return get().plans.find((p) => p.id === id);
+    deleteFromCloud(PLAN_TABLE, PLAN_KEY, id);
   },
 }));

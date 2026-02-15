@@ -1,53 +1,43 @@
 import { create } from 'zustand';
-import { generateId, getToday } from '../utils/formatters';
+import { saveToCloud, loadFromCloud, upsertItemToCloud, deleteFromCloud } from '../lib/syncManager';
+import { generateId, getNextNumber } from '../utils/formatters';
 
-const STORAGE_KEY = 'electripro-obras';
+const TABLE = 'obras';
+const LOCAL_KEY = 'electripro-obras';
 
-const loadObras = () => {
+const getLocalObras = () => {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(LOCAL_KEY);
     if (saved) return JSON.parse(saved);
-  } catch (e) { /* ignore */ }
+  } catch { /* ignore */ }
   return [];
 };
 
-const saveObras = (obras) => {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(obras));
-  } catch (e) { /* ignore */ }
-};
-
-const getNextNumber = (obras) => {
-  if (obras.length === 0) return 1;
-  return Math.max(...obras.map((o) => o.number || 0)) + 1;
-};
-
 export const useObraStore = create((set, get) => ({
-  obras: loadObras(),
+  obras: getLocalObras(),
+  loaded: false,
 
-  createObra: (data = {}) => {
+  loadObras: async () => {
+    const data = await loadFromCloud(TABLE, LOCAL_KEY);
+    set({ obras: data || [], loaded: true });
+  },
+
+  createObra: (obraData) => {
     const obras = get().obras;
+    const number = getNextNumber(obras, 'OBRA');
     const newObra = {
       id: generateId('obra'),
-      number: getNextNumber(obras),
-      client: '',
-      address: '',
-      startDate: getToday(),
-      endDate: '',
-      totalPoints: 0,
-      budgetAmount: 0,
-      collectedAmount: 0,
-      status: 'presupuestada',
-      presupuestoId: '',
-      conteoId: '',
-      planificacionId: '',
+      number,
+      ...obraData,
+      status: obraData.status || 'pendiente',
+      tasks: obraData.tasks || [],
+      notes: obraData.notes || '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      ...data,
     };
     const updated = [...obras, newObra];
-    saveObras(updated);
     set({ obras: updated });
+    upsertItemToCloud(TABLE, LOCAL_KEY, newObra);
     return newObra;
   },
 
@@ -55,17 +45,16 @@ export const useObraStore = create((set, get) => ({
     const obras = get().obras.map((o) =>
       o.id === id ? { ...o, ...updates, updatedAt: new Date().toISOString() } : o
     );
-    saveObras(obras);
     set({ obras });
+    const updated = obras.find((o) => o.id === id);
+    if (updated) upsertItemToCloud(TABLE, LOCAL_KEY, updated);
   },
 
   deleteObra: (id) => {
     const obras = get().obras.filter((o) => o.id !== id);
-    saveObras(obras);
     set({ obras });
+    deleteFromCloud(TABLE, LOCAL_KEY, id);
   },
 
-  getObraById: (id) => {
-    return get().obras.find((o) => o.id === id);
-  },
+  getObraById: (id) => get().obras.find((o) => o.id === id),
 }));

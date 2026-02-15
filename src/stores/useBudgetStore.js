@@ -1,49 +1,42 @@
 import { create } from 'zustand';
-import { generateId, getToday } from '../utils/formatters';
+import { saveToCloud, loadFromCloud, upsertItemToCloud, deleteFromCloud } from '../lib/syncManager';
+import { generateId, getNextNumber } from '../utils/formatters';
 
-const STORAGE_KEY = 'electripro-budgets';
+const TABLE = 'budgets';
+const LOCAL_KEY = 'electripro-budgets';
 
-const loadBudgets = () => {
+const getLocalBudgets = () => {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(LOCAL_KEY);
     if (saved) return JSON.parse(saved);
-  } catch (e) { /* ignore */ }
+  } catch { /* ignore */ }
   return [];
 };
 
-const saveBudgets = (budgets) => {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(budgets));
-  } catch (e) { /* ignore */ }
-};
-
-const getNextNumber = (budgets) => {
-  if (budgets.length === 0) return 1;
-  return Math.max(...budgets.map((b) => b.number || 0)) + 1;
-};
-
 export const useBudgetStore = create((set, get) => ({
-  budgets: loadBudgets(),
+  budgets: getLocalBudgets(),
+  loaded: false,
 
-  createBudget: (data = {}) => {
+  loadBudgets: async () => {
+    const data = await loadFromCloud(TABLE, LOCAL_KEY);
+    set({ budgets: data || [], loaded: true });
+  },
+
+  createBudget: (budgetData) => {
     const budgets = get().budgets;
+    const number = getNextNumber(budgets, 'PRES');
     const newBudget = {
       id: generateId('pres'),
-      number: getNextNumber(budgets),
-      date: getToday(),
-      validity: '15 días',
-      client: { name: '', address: '', phone: '', email: '' },
-      items: [],
-      iva: 21,
+      number,
+      ...budgetData,
+      items: budgetData.items || [],
       status: 'borrador',
-      notes: '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      ...data,
     };
     const updated = [...budgets, newBudget];
-    saveBudgets(updated);
     set({ budgets: updated });
+    upsertItemToCloud(TABLE, LOCAL_KEY, newBudget);
     return newBudget;
   },
 
@@ -51,36 +44,36 @@ export const useBudgetStore = create((set, get) => ({
     const budgets = get().budgets.map((b) =>
       b.id === id ? { ...b, ...updates, updatedAt: new Date().toISOString() } : b
     );
-    saveBudgets(budgets);
     set({ budgets });
+    const updated = budgets.find((b) => b.id === id);
+    if (updated) upsertItemToCloud(TABLE, LOCAL_KEY, updated);
   },
 
   deleteBudget: (id) => {
     const budgets = get().budgets.filter((b) => b.id !== id);
-    saveBudgets(budgets);
     set({ budgets });
+    deleteFromCloud(TABLE, LOCAL_KEY, id);
   },
 
   duplicateBudget: (id) => {
     const original = get().budgets.find((b) => b.id === id);
     if (!original) return null;
     const budgets = get().budgets;
-    const dup = {
+    const number = getNextNumber(budgets, 'PRES');
+    const duplicate = {
       ...original,
       id: generateId('pres'),
-      number: getNextNumber(budgets),
-      date: getToday(),
+      number,
       status: 'borrador',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      client: { ...original.client, name: `${original.client?.name || ''} (copia)` },
     };
-    const updated = [...budgets, dup];
-    saveBudgets(updated);
+    const updated = [...budgets, duplicate];
     set({ budgets: updated });
-    return dup;
+    upsertItemToCloud(TABLE, LOCAL_KEY, duplicate);
+    return duplicate;
   },
 
-  getBudgetById: (id) => {
-    return get().budgets.find((b) => b.id === id);
-  },
+  getBudgetById: (id) => get().budgets.find((b) => b.id === id),
 }));

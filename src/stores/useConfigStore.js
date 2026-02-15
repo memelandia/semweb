@@ -1,67 +1,87 @@
 import { create } from 'zustand';
-import { DEFAULT_CONFIG } from '../utils/constants';
+import { loadConfigFromCloud, saveConfigToCloud } from '../lib/syncManager';
 
-const STORAGE_KEY = 'electripro-config';
+const LOCAL_KEY = 'electripro-config';
 
-const loadConfig = () => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) return { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
-  } catch (e) { /* ignore */ }
-  return { ...DEFAULT_CONFIG };
+const defaultConfig = {
+  businessName: 'ElectriPro',
+  ownerName: '',
+  phone: '',
+  email: '',
+  address: '',
+  logo: null,
+  currency: 'ARS',
+  iva: 21,
+  marginDefault: 30,
+  theme: 'dark',
 };
 
-const saveConfig = (config) => {
+const getLocalConfig = () => {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-  } catch (e) { /* ignore */ }
+    const saved = localStorage.getItem(LOCAL_KEY);
+    if (saved) return { ...defaultConfig, ...JSON.parse(saved) };
+  } catch { /* ignore */ }
+  return { ...defaultConfig };
 };
 
 export const useConfigStore = create((set, get) => ({
-  config: loadConfig(),
+  config: getLocalConfig(),
+  loaded: false,
+
+  loadConfig: async () => {
+    const data = await loadConfigFromCloud(LOCAL_KEY);
+    if (data) {
+      set({ config: { ...defaultConfig, ...data }, loaded: true });
+    } else {
+      await saveConfigToCloud(LOCAL_KEY, get().config);
+      set({ loaded: true });
+    }
+  },
 
   updateConfig: (updates) => {
     const config = { ...get().config, ...updates };
-    saveConfig(config);
     set({ config });
+    saveConfigToCloud(LOCAL_KEY, config);
   },
 
   resetConfig: () => {
-    saveConfig(DEFAULT_CONFIG);
-    set({ config: { ...DEFAULT_CONFIG } });
+    set({ config: { ...defaultConfig } });
+    saveConfigToCloud(LOCAL_KEY, defaultConfig);
   },
 
   exportData: () => {
-    const data = {
-      config: get().config,
-      prices: JSON.parse(localStorage.getItem('electripro-prices') || '[]'),
-      budgets: JSON.parse(localStorage.getItem('electripro-budgets') || '[]'),
-      obras: JSON.parse(localStorage.getItem('electripro-obras') || '[]'),
-      conteos: JSON.parse(localStorage.getItem('electripro-conteos') || '[]'),
-      plans: JSON.parse(localStorage.getItem('electripro-plans') || '[]'),
-      exportedAt: new Date().toISOString(),
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `electripro-backup-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const data = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key.startsWith('electripro-')) {
+          data[key] = JSON.parse(localStorage.getItem(key));
+        }
+      }
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `electripro-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return true;
+    } catch {
+      return false;
+    }
   },
 
-  importData: (jsonStr) => {
+  importData: (jsonString) => {
     try {
-      const data = JSON.parse(jsonStr);
-      if (data.config) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data.config)); }
-      if (data.prices) { localStorage.setItem('electripro-prices', JSON.stringify(data.prices)); }
-      if (data.budgets) { localStorage.setItem('electripro-budgets', JSON.stringify(data.budgets)); }
-      if (data.obras) { localStorage.setItem('electripro-obras', JSON.stringify(data.obras)); }
-      if (data.conteos) { localStorage.setItem('electripro-conteos', JSON.stringify(data.conteos)); }
-      if (data.plans) { localStorage.setItem('electripro-plans', JSON.stringify(data.plans)); }
+      const data = JSON.parse(jsonString);
+      Object.entries(data).forEach(([key, value]) => {
+        if (key.startsWith('electripro-')) {
+          localStorage.setItem(key, JSON.stringify(value));
+        }
+      });
       window.location.reload();
       return true;
-    } catch (e) {
+    } catch {
       return false;
     }
   },
